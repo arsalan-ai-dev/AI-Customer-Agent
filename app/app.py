@@ -3,11 +3,16 @@ import streamlit as st
 import tempfile
 
 # Direct module imports to bypass HTTP/localhost connection issues
-from app.multi_agent import run_agent
-# Import ingestion and database utility functions from your internal service modules
+# Try direct import first, fallback to package import
 try:
-    from app.services.ingestion import process_and_ingest_document, get_active_documents, clear_knowledge_base
+    from multi_agent import run_agent
 except ImportError:
+    from app.multi_agent import run_agent
+
+try:
+    from services.ingestion import process_and_ingest_document, get_active_documents, clear_knowledge_base
+except ImportError:
+    from app.services.ingestion import process_and_ingest_document, get_active_documents, clear_knowledge_base
     # Fallback placeholders if internal structure varies slightly
     def process_and_ingest_document(file_path):
         return {"filename": os.path.basename(file_path), "chunks_added": 1}
