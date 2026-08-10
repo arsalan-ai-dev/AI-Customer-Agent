@@ -3,7 +3,12 @@ from typing import List
 from langchain_core.documents import Document
 from langchain_community.embeddings import FastEmbedEmbeddings
 from langchain_chroma import Chroma
-from app.config.settings import settings
+
+try:
+    from app.config.settings import settings
+    CHROMA_DIR = getattr(settings, "CHROMA_DIR", "./chroma_db")
+except Exception:
+    CHROMA_DIR = "./chroma_db"
 
 logger = logging.getLogger(__name__)
 
@@ -12,8 +17,7 @@ class VectorStoreManager:
     """Enterprise Vector Store Manager utilizing ChromaDB and FastEmbed Embeddings."""
 
     def __init__(self):
-        self.persist_directory = settings.CHROMA_DIR
-        # FastEmbed uses ONNX runtime (~100MB RAM) to fit within Render memory limits
+        self.persist_directory = CHROMA_DIR
         self.embeddings = FastEmbedEmbeddings(
             model_name="BAAI/bge-small-en-v1.5"
         )

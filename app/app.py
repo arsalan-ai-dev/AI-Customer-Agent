@@ -5,20 +5,19 @@ import traceback
 import streamlit as st
 
 # ---------------------------------------------------
-# ⚙️ Path Resolution (Must be at the very top)
+# ⚙️ Path Resolution (Must be at top)
 # ---------------------------------------------------
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(current_dir)
 
-# Prioritize project root to allow 'from app.x...' imports
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 if current_dir not in sys.path:
     sys.path.insert(0, current_dir)
 
-# Direct Backend Imports (Surfaces exact tracebacks if sub-modules fail)
+# Direct Backend Imports
 from app.multi_agent import run_agent
-from app.services.ingestion import (
+from app.services.ingest import (
     process_and_ingest_document,
     get_active_documents,
     clear_knowledge_base,
@@ -36,7 +35,6 @@ st.set_page_config(
 st.title("🤖 AI Customer Support Agent")
 st.caption("Containerized Hybrid Retrieval-Augmented Generation (RAG) Architecture")
 
-# Initialize Chat History
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
@@ -51,18 +49,14 @@ with st.sidebar:
     if uploaded_file is not None:
         if st.button("📥 Process & Ingest Document", use_container_width=True):
             with st.spinner("Ingesting and indexing document..."):
-                # Preserve original filename and extension using a temporary folder
                 temp_dir = tempfile.mkdtemp()
                 temp_path = os.path.join(temp_dir, uploaded_file.name)
                 
                 try:
-                    # Write uploaded bytes to temporary disk path
                     with open(temp_path, "wb") as f:
                         f.write(uploaded_file.getvalue())
 
                     print(f"[INGEST LOG] Ingesting file: {temp_path}")
-                    
-                    # Execute in-process document ingestion
                     result = process_and_ingest_document(temp_path)
                     print(f"[INGEST LOG] Ingestion result: {result}")
 
@@ -74,7 +68,6 @@ with st.sidebar:
                     print(f"[INGEST ERROR]\n{err_msg}")
                     st.sidebar.error(f"Ingestion Failed: {str(e)}")
                 finally:
-                    # Clean up temporary disk files
                     if os.path.exists(temp_path):
                         os.remove(temp_path)
                     if os.path.exists(temp_dir):

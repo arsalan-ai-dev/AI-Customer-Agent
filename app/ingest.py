@@ -7,7 +7,6 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import FastEmbedEmbeddings
 from langchain_chroma import Chroma
 
-# Try importing settings, fallback to environment variable or local default
 try:
     from app.config.settings import settings
     CHROMA_DB_DIR = getattr(settings, "CHROMA_DIR", "./chroma_db")
@@ -15,7 +14,7 @@ except Exception:
     load_dotenv()
     CHROMA_DB_DIR = os.getenv("CHROMA_DB_DIR", "./chroma_db")
 
-# Lightweight FastEmbed (~100MB RAM) for Render 512MB limit
+# Lightweight FastEmbed (~100MB RAM) for Render free tier
 embeddings = FastEmbedEmbeddings(model_name="BAAI/bge-small-en-v1.5")
 
 
