@@ -16,24 +16,13 @@ if project_root not in sys.path:
 if current_dir not in sys.path:
     sys.path.insert(0, current_dir)
 
-# Backend Module Imports
-try:
-    from app.multi_agent import run_agent
-except ImportError:
-    from multi_agent import run_agent
-
-try:
-    from app.services.ingestion import (
-        process_and_ingest_document,
-        get_active_documents,
-        clear_knowledge_base,
-    )
-except ImportError:
-    from services.ingestion import (
-        process_and_ingest_document,
-        get_active_documents,
-        clear_knowledge_base,
-    )
+# Direct Backend Imports (Surfaces exact tracebacks if sub-modules fail)
+from app.multi_agent import run_agent
+from app.services.ingestion import (
+    process_and_ingest_document,
+    get_active_documents,
+    clear_knowledge_base,
+)
 
 # ---------------------------------------------------
 # 🎨 Page Configuration
