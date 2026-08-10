@@ -8,6 +8,13 @@
 
 An enterprise-grade, asynchronous AI customer support platform leveraging **Dynamic Multi-Agent Orchestration**, **Hybrid RAG (ChromaDB + BM25)**, and stateful session memory. Built with high performance, scalability, and modularity in mind.
 
+## 🚀 Live Demo
+
+- 🌐 **Live Application:** https://ai-customer-agent-02vo.onrender.com/
+- 📚 **API Documentation:** https://ai-customer-agent-02vo.onrender.com/docs
+
+> Deployed on Render with a Streamlit interface and FastAPI REST API.
+
 ---
 
 ## 🏛️ System Architecture
