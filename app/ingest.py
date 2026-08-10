@@ -14,7 +14,7 @@ except Exception:
     load_dotenv()
     CHROMA_DB_DIR = os.getenv("CHROMA_DB_DIR", "./chroma_db")
 
-# Lightweight FastEmbed (~100MB RAM) for Render free tier
+# Lightweight FastEmbed (~100MB RAM) for Render Free Tier
 embeddings = FastEmbedEmbeddings(model_name="BAAI/bge-small-en-v1.5")
 
 

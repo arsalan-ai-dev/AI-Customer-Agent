@@ -5,23 +5,37 @@ import traceback
 import streamlit as st
 
 # ---------------------------------------------------
-# ⚙️ Path Resolution (Must be at top)
+# ⚙️ Path Resolution (Must be at the top)
 # ---------------------------------------------------
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(current_dir)
 
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
-if current_dir not in sys.path:
-    sys.path.insert(0, current_dir)
+for p in (project_root, current_dir):
+    if p not in sys.path:
+        sys.path.insert(0, p)
 
-# Direct Backend Imports
+# Flexible Imports targeting ingest.py (checks services/ingest first, then app/ingest)
 from app.multi_agent import run_agent
-from app.services.ingest import (
-    process_and_ingest_document,
-    get_active_documents,
-    clear_knowledge_base,
-)
+
+try:
+    from app.services.ingest import (
+        process_and_ingest_document,
+        get_active_documents,
+        clear_knowledge_base,
+    )
+except ModuleNotFoundError:
+    try:
+        from services.ingest import (
+            process_and_ingest_document,
+            get_active_documents,
+            clear_knowledge_base,
+        )
+    except ModuleNotFoundError:
+        from app.ingest import (
+            process_and_ingest_document,
+            get_active_documents,
+            clear_knowledge_base,
+        )
 
 # ---------------------------------------------------
 # 🎨 Page Configuration
