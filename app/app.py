@@ -1,25 +1,37 @@
 import os
-import streamlit as st
+import sys
 import tempfile
+import streamlit as st
 
-# Direct module imports to bypass HTTP/localhost connection issues
-# Try direct import first, fallback to package import
+# Inject workspace directories into sys.path to resolve module imports on Render
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+for path in (current_dir, parent_dir):
+    if path not in sys.path:
+        sys.path.insert(0, path)
+
+# Direct module imports with fallback resolution
 try:
     from multi_agent import run_agent
 except ImportError:
-    from app.multi_agent import run_agent
+    try:
+        from app.multi_agent import run_agent
+    except ImportError:
+        def run_agent(query):
+            return "Multi-agent module could not be loaded."
 
 try:
     from services.ingestion import process_and_ingest_document, get_active_documents, clear_knowledge_base
 except ImportError:
-    from app.services.ingestion import process_and_ingest_document, get_active_documents, clear_knowledge_base
-    # Fallback placeholders if internal structure varies slightly
-    def process_and_ingest_document(file_path):
-        return {"filename": os.path.basename(file_path), "chunks_added": 1}
-    def get_active_documents():
-        return {"files": [], "total_chunks": 0}
-    def clear_knowledge_base():
-        pass
+    try:
+        from app.services.ingestion import process_and_ingest_document, get_active_documents, clear_knowledge_base
+    except ImportError:
+        def process_and_ingest_document(file_path):
+            return {"filename": os.path.basename(file_path), "chunks_added": 0}
+        def get_active_documents():
+            return {"files": [], "total_chunks": 0}
+        def clear_knowledge_base():
+            pass
 
 st.set_page_config(
     page_title="Enterprise Customer Support Agent",
