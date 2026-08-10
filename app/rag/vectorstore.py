@@ -1,7 +1,7 @@
 import logging
 from typing import List
 from langchain_core.documents import Document
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_community.embeddings import FastEmbedEmbeddings
 from langchain_chroma import Chroma
 from app.config.settings import settings
 
@@ -9,18 +9,19 @@ logger = logging.getLogger(__name__)
 
 
 class VectorStoreManager:
-    """Enterprise Vector Store Manager utilizing ChromaDB and HuggingFace Embeddings."""
+    """Enterprise Vector Store Manager utilizing ChromaDB and FastEmbed Embeddings."""
 
     def __init__(self):
         self.persist_directory = settings.CHROMA_DIR
-        self.embeddings = HuggingFaceEmbeddings(
-            model_name=settings.EMBEDDING_MODEL_NAME
+        # FastEmbed uses ONNX runtime (~100MB RAM) to fit within Render memory limits
+        self.embeddings = FastEmbedEmbeddings(
+            model_name="BAAI/bge-small-en-v1.5"
         )
 
     def create_vectorstore(self, documents: List[Document]) -> Chroma:
         """Creates and persists vector store from document chunks."""
         logger.info(
-            f"Generating embeddings using '{settings.EMBEDDING_MODEL_NAME}' "
+            f"Generating embeddings using FastEmbed (bge-small-en-v1.5) "
             f"and persisting to '{self.persist_directory}'..."
         )
 
