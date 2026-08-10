@@ -1,50 +1,69 @@
-version: '3.8'
-
 services:
-  # -------------------------------------------------------------
-  # FastAPI Backend Service
-  # -------------------------------------------------------------
-  backend:
-    build:
-      context: .
-      dockerfile: Dockerfile
+  # ---------------------------------------------------
+  # 📊 Standalone Arize Phoenix Server
+  # ---------------------------------------------------
+  phoenix:
+    image: arizephoenix/phoenix:latest
+    container_name: phoenix_server
+    ports:
+      - "6006:6006"
+    networks:
+      - ai_agent_network
+    restart: unless-stopped
+
+  # ---------------------------------------------------
+  # ⚡ FastAPI Backend
+  # ---------------------------------------------------
+  
+   # ---------------------------------------------------
+  # ⚡ FastAPI Backend
+  # ---------------------------------------------------
+  ai_agent_backend:
+    build: .
     container_name: ai_agent_backend
-    command: uvicorn fastapi_app:app --host 0.0.0.0 --port 8000
+    init: true
+    command: ["uvicorn", "app.fastapi_app:app", "--host", "0.0.0.0", "--port", "8000"]
     ports:
       - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - HUGGINGFACEHUB_API_TOKEN=${HUGGINGFACEHUB_API_TOKEN}
+      - PHOENIX_COLLECTOR_ENDPOINT=http://phoenix:6006
+      - CHROMA_PATH=/app/chroma_db
+    volumes:
+      - .:/app
+      - ./chroma_db:/app/chroma_db
+    depends_on:
+      - phoenix
+    networks:
+      - ai_agent_network
+    restart: unless-stopped
+
+  # ---------------------------------------------------
+  # 🖥️ Streamlit Frontend
+  # ---------------------------------------------------
+  ai_agent_frontend:
+    build: .
+    container_name: ai_agent_frontend
+    command: streamlit run app/app.py --server.port=8501 --server.address=0.0.0.0
+    ports:
+      - "8501:8501"
     env_file:
       - .env
     environment:
-      - HOST=0.0.0.0
-      - PORT=8000
+      - BACKEND_URL=http://ai_agent_backend:8000
     volumes:
-      - ./data:/app/data              # Persist ChromaDB vector store
-      - ./uploads:/app/uploads        # Persist uploaded documents
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-    restart: always
-
-  # -------------------------------------------------------------
-  # Streamlit Frontend Service
-  # -------------------------------------------------------------
-  frontend:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: ai_agent_frontend
-    command: streamlit run streamlit_app.py --server.port=8501 --server.address=0.0.0.0
-    ports:
-      - "8501:8501"
-    environment:
-      - BACKEND_URL=http://backend:8000/api/v1  # Points directly to container service name
+      - .:/app
     depends_on:
-      backend:
-        condition: service_healthy              # Waits for backend health check to pass
-    restart: always
+      - ai_agent_backend
+    networks:
+      - ai_agent_network
+    restart: unless-stopped
 
+# ---------------------------------------------------
+# 🌐 Isolated Bridge Network
+# ---------------------------------------------------
 networks:
-  default:
-    name: ai_agent_network
+  ai_agent_network:
+    driver: bridge

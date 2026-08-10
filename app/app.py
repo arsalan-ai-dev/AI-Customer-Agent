@@ -1,73 +1,124 @@
-import streamlit as st
 import os
-from dotenv import load_dotenv
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_community.vectorstores import Chroma
-from langchain_groq import ChatGroq  # 🎯 Pure Groq integration
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnablePassthrough
-from langchain_core.output_parsers import StrOutputParser
+import requests
+import streamlit as st
 
-# Load environment variables
-load_dotenv()
+BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 
-st.set_page_config(page_title="AI Customer Agent", page_icon="🤖", layout="centered")
+st.set_page_config(
+    page_title="Enterprise Customer Support Agent",
+    page_icon="🤖",
+    layout="wide"
+)
+
 st.title("🤖 AI Customer Support Agent")
-st.write("Ask anything based on the ingested documentation!")
+st.caption("Containerized Hybrid Retrieval-Augmented Generation (RAG) Architecture")
 
-@st.cache_resource
-def load_vectorstore():
-    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-    return Chroma(persist_directory="./chroma_db", embedding_function=embeddings)
+# Initialize Chat History
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-try:
-    vector_store = load_vectorstore()
-    retriever = vector_store.as_retriever(search_kwargs={"k": 3})
+# Fetch active documents from backend
+def fetch_active_docs():
+    try:
+        res = requests.get(f"{BACKEND_URL}/documents", timeout=5)
+        if res.status_code == 200:
+            return res.json()
+    except Exception:
+        pass
+    return {"files": [], "total_chunks": 0}
 
-    # ⚡ Initialize Groq Llama-3 (Free & Fast)
-    llm = ChatGroq(
-        temperature=0.2,
-        model_name="llama-3.1-8b-instant",
-       groq_api_key=os.getenv("GROQ_API_KEY")
-    )   
-
-    template = """You are an expert customer support agent. Use the following pieces of retrieved context to answer the question. If you don't know the answer, say that you don't know.
-
-Context:
-{context}
-
-Question: {question}
-Answer:"""
+# ---------------------------------------------------
+# 📁 Sidebar Management
+# ---------------------------------------------------
+with st.sidebar:
+    st.header("📄 Knowledge Base Management")
     
-    prompt = ChatPromptTemplate.from_template(template)
+    uploaded_file = st.file_uploader("Upload PDF or TXT Document", type=["pdf", "txt"])
+    
+    if uploaded_file is not None:
+        if st.button("📥 Process & Ingest Document", use_container_width=True):
+            with st.spinner("Ingesting and indexing document..."):
+                try:
+                    files = {"file": (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)}
+                    response = requests.post(f"{BACKEND_URL}/upload", files=files, timeout=60)
+                    if response.status_code == 200:
+                        data = response.json()
+                        st.success(f"Successfully ingested **{data['filename']}** ({data['chunks_added']} chunks added)!")
+                        st.rerun()
+                    else:
+                        st.error(f"Failed: {response.text}")
+                except Exception as e:
+                    st.error(f"Connection Error: {e}")
 
-    def format_docs(docs):
-        return "\n\n".join([d.page_content for d in docs])
+    st.markdown("---")
+    
+    # Active Files Inspection
+    st.subheader("📚 Active Indexed Documents")
+    doc_info = fetch_active_docs()
+    
+    if doc_info["files"]:
+        for file in doc_info["files"]:
+            st.markdown(f"• `{file}`")
+        st.caption(f"Total Chunks Indexed: **{doc_info['total_chunks']}**")
+    else:
+        st.info("No documents active in Knowledge Base.")
 
-    rag_chain = (
-        {"context": retriever | format_docs, "question": RunnablePassthrough()}
-        | prompt
-        | llm
-        | StrOutputParser()
-    )
+    st.markdown("---")
 
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
+    # Clear Knowledge Base Button
+    if st.button("🗑️ Clear Knowledge Base", use_container_width=True, type="secondary"):
+        try:
+            res = requests.delete(f"{BACKEND_URL}/clear", timeout=10)
+            if res.status_code == 200:
+                st.session_state.messages = []
+                st.success("Knowledge Base cleared and chat reset!")
+                st.rerun()
+            else:
+                st.error("Failed to clear Knowledge Base.")
+        except Exception as e:
+            st.error(f"Error: {e}")
 
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+# ---------------------------------------------------
+# 💬 Chat Interface
+# ---------------------------------------------------
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.write(message["content"])
 
-    if user_query := st.chat_input("How can I help you today?"):
-        st.session_state.messages.append({"role": "user", "content": user_query})
-        with st.chat_message("user"):
-            st.markdown(user_query)
+if prompt := st.chat_input("Ask a question about your knowledge base..."):
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.write(prompt)
 
-        with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
-                response = rag_chain.invoke(user_query)
-                st.markdown(response)
-        st.session_state.messages.append({"role": "assistant", "content": response})
+    with st.chat_message("assistant"):
+        message_placeholder = st.empty()
+        full_response = ""
 
-except Exception as e:
-    st.error(f"Error initializing agent: {e}")
+        try:
+            payload = {
+                "question": prompt,
+                "history": [
+                    {"role": m["role"], "content": m["content"]}
+                    for m in st.session_state.messages[:-1]
+                ]
+            }
+
+            with requests.post(
+                f"{BACKEND_URL}/chat/stream",
+                json=payload,
+                stream=True,
+                timeout=60
+            ) as response:
+                if response.status_code == 200:
+                    for chunk in response.iter_content(chunk_size=None, decode_unicode=True):
+                        if chunk:
+                            full_response += chunk
+                            message_placeholder.markdown(full_response + "▌")
+                    message_placeholder.markdown(full_response)
+                else:
+                    message_placeholder.error(f"Backend error: {response.status_code}")
+        except Exception as e:
+            message_placeholder.error(f"Error connecting to server: {e}")
+
+    if full_response:
+        st.session_state.messages.append({"role": "assistant", "content": full_response})

@@ -1,104 +1,96 @@
-from typing import Literal, List, Dict, Any
-from langchain_groq import ChatGroq
-from langchain_core.tools import tool
-from langgraph.graph import StateGraph, MessagesState, END
-from langgraph.prebuilt import ToolNode
-from hybrid_retriever import HybridRetriever
 import os
+from typing import Dict, Any
 from dotenv import load_dotenv
 
+from langchain_groq import ChatGroq
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+
+# 1. Force load environment variables from .env
 load_dotenv()
 
+groq_api_key = os.getenv("GROQ_API_KEY")
+
+if not groq_api_key:
+    raise ValueError(
+        "GROQ_API_KEY is missing! Please ensure it is defined in your .env file."
+    )
+
+# 2. Initialize the shared LLM instance with the loaded API key
 llm = ChatGroq(
     temperature=0.2,
     model_name="llama-3.1-8b-instant",
-    groq_api_key=os.getenv("GROQ_API_KEY")
+    groq_api_key=groq_api_key
 )
 
-retriever = HybridRetriever()
+# -------------------------------------------------------------------
+# Agent 1: Router / Intent Classifier
+# Determines whether the question is general or requires document retrieval
+# -------------------------------------------------------------------
+router_prompt = ChatPromptTemplate.from_template(
+    """You are an intent router for a customer support AI system.
+Classify the user's input into one of two categories:
+1. 'GENERAL': Greetings, small talk, or general questions not related to product docs.
+2. 'SUPPORT': Questions asking about specific product details, policies, technical issues, or documentation.
 
-@tool
-def search_documents(query: str) -> str:
-    """Search the document database for relevant information."""
-    docs = retriever.retrieve(query, top_k=3)
-    if not docs:
-        return "No relevant information found."
-    return "\n\n".join(docs)
+Respond with ONLY one word: either 'GENERAL' or 'SUPPORT'.
 
-tools = [search_documents]
-tool_node = ToolNode(tools)
+User Input: {question}
+Classification:"""
+)
 
-def supervisor_agent(state: MessagesState) -> Dict[str, Any]:
-    """Supervisor decides whether to search or end."""
-    messages = state["messages"]
-    last_message = messages[-1].content if messages else ""
-    
-    if "search" in last_message.lower() or "find" in last_message.lower():
-        return {"next": "researcher"}
-    else:
-        return {"next": "validator"}
+router_chain = router_prompt | llm | StrOutputParser()
 
-def researcher_agent(state: MessagesState) -> Dict[str, Any]:
-    """Researcher searches documents and returns findings."""
-    messages = state["messages"]
-    query = messages[-1].content if messages else ""
-    
-    docs = retriever.retrieve(query, top_k=3)
-    if docs:
-        context = "\n\n".join(docs)
-        response = llm.invoke(f"Based on these documents, answer the user's question: {query}\n\nDocuments: {context}")
-        return {"messages": [{"role": "assistant", "content": response.content}]}
-    else:
-        return {"messages": [{"role": "assistant", "content": "I couldn't find relevant information."}]}
 
-def validator_agent(state: MessagesState) -> Dict[str, Any]:
-    """Validator checks if the answer is correct and complete."""
-    messages = state["messages"]
-    last_response = messages[-1].content if messages else ""
-    
-    validation_prompt = f"""Check if this answer is accurate and complete based on the context.
-    If it's inaccurate or incomplete, say "HALLUCINATION DETECTED" and explain why.
-    If it's accurate, say "VALID" and summarize why.
-    
-    Answer: {last_response}
-    """
-    
-    validation = llm.invoke(validation_prompt)
-    return {"messages": [{"role": "validator", "content": validation.content}]}
+# -------------------------------------------------------------------
+# Agent 2: General Conversation Specialist
+# Handles non-technical, conversational queries
+# -------------------------------------------------------------------
+general_prompt = ChatPromptTemplate.from_template(
+    """You are a polite and helpful customer support assistant. 
+Respond warmly and concisely to the customer's input.
 
-def should_continue(state: Dict[str, Any]) -> Literal["researcher", "validator", END]:
-    """Determine which node to go to next."""
-    if state.get("next") == "researcher":
-        return "researcher"
-    elif state.get("next") == "validator":
-        return "validator"
-    else:
-        return END
+User: {question}
+Assistant:"""
+)
 
-workflow = StateGraph(MessagesState)
+general_agent_chain = general_prompt | llm | StrOutputParser()
 
-workflow.add_node("supervisor", supervisor_agent)
-workflow.add_node("researcher", researcher_agent)
-workflow.add_node("validator", validator_agent)
-workflow.add_node("tools", tool_node)
 
-workflow.set_entry_point("supervisor")
-workflow.add_conditional_edges("supervisor", should_continue)
-workflow.add_edge("researcher", "validator")
-workflow.add_edge("validator", END)
+# -------------------------------------------------------------------
+# Agent 3: Technical / Document Support Specialist
+# Formulates targeted answers based on retrieved context
+# -------------------------------------------------------------------
+support_prompt = ChatPromptTemplate.from_template(
+    """You are an expert technical support specialist. Answer the user's question clearly based on customer support guidelines.
+If the information requires specific internal database context, provide a clear and direct answer based on standard support protocol.
 
-app = workflow.compile()
+Question: {question}
+Answer:"""
+)
 
+support_agent_chain = support_prompt | llm | StrOutputParser()
+
+
+# -------------------------------------------------------------------
+# Orchestrator Function (Called by FastAPI)
+# -------------------------------------------------------------------
 def run_agent(question: str) -> str:
-    """Run the multi-agent system."""
-    result = app.invoke({"messages": [{"role": "user", "content": question}]})
-    
-    for msg in result["messages"]:
-        if msg["role"] == "assistant":
-            return msg["content"]
-    
-    return "No response generated."
+    """
+    Main entry point for multi-agent execution called by FastAPI /chat endpoint.
+    """
+    try:
+        # Step 1: Route user query
+        intent = router_chain.invoke({"question": question}).strip().upper()
+        
+        # Step 2: Delegate to specialized agent based on routing decision
+        if "GENERAL" in intent:
+            response = general_agent_chain.invoke({"question": question})
+        else:
+            response = support_agent_chain.invoke({"question": question})
+            
+        return response
 
-if __name__ == "__main__":
-    response = run_agent("What is the purpose of this document?")
-    print("Agent Response:", response)
+    except Exception as e:
+        # Graceful error fallback for API or LLM issues
+        return f"Agent execution error: {str(e)}"
