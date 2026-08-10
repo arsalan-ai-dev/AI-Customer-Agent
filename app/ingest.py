@@ -5,44 +5,44 @@ from dotenv import load_dotenv
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import FastEmbedEmbeddings
-from langchain_community.vectorstores import Chroma
+from langchain_chroma import Chroma
 
-load_dotenv()
+# Try importing settings, fallback to environment variable or local default
+try:
+    from app.config.settings import settings
+    CHROMA_DB_DIR = getattr(settings, "CHROMA_DIR", "./chroma_db")
+except Exception:
+    load_dotenv()
+    CHROMA_DB_DIR = os.getenv("CHROMA_DB_DIR", "./chroma_db")
 
-CHROMA_DB_DIR = os.getenv("CHROMA_DB_DIR", "./chroma_db")
-
-# Initialize lightweight FastEmbed model (<150MB RAM footprint for Render free tier)
+# Lightweight FastEmbed (~100MB RAM) for Render 512MB limit
 embeddings = FastEmbedEmbeddings(model_name="BAAI/bge-small-en-v1.5")
 
 
 def process_and_ingest_document(file_path: str) -> dict:
-    """Ingests a PDF or TXT document into the Chroma vector database."""
+    """Ingests a PDF or TXT document into ChromaDB."""
     if not os.path.exists(file_path):
-        raise FileNotFoundError(f"File path does not exist: {file_path}")
+        raise FileNotFoundError(f"File not found: {file_path}")
 
     filename = os.path.basename(file_path)
 
-    # Select document loader based on file extension
     if file_path.lower().endswith(".pdf"):
         loader = PyPDFLoader(file_path)
     elif file_path.lower().endswith(".txt"):
         loader = TextLoader(file_path, encoding="utf-8")
     else:
-        raise ValueError("Unsupported format. Please upload a .pdf or .txt file.")
+        raise ValueError("Unsupported format. Please upload .pdf or .txt")
 
     docs = loader.load()
     if not docs:
         return {"filename": filename, "chunks_added": 0}
 
-    # Tag document metadata with source filename
     for doc in docs:
         doc.metadata["source"] = filename
 
-    # Chunking Strategy
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
     chunks = text_splitter.split_documents(docs)
 
-    # Save to Chroma DB
     vector_store = Chroma(
         persist_directory=CHROMA_DB_DIR,
         embedding_function=embeddings
@@ -53,7 +53,7 @@ def process_and_ingest_document(file_path: str) -> dict:
 
 
 def get_active_documents() -> dict:
-    """Retrieves active files and chunk counts from ChromaDB."""
+    """Retrieves list of active indexed files from ChromaDB."""
     if not os.path.exists(CHROMA_DB_DIR):
         return {"files": [], "total_chunks": 0}
 
@@ -74,6 +74,6 @@ def get_active_documents() -> dict:
 
 
 def clear_knowledge_base():
-    """Removes the stored vector database directory."""
+    """Clears the stored vector database."""
     if os.path.exists(CHROMA_DB_DIR):
         shutil.rmtree(CHROMA_DB_DIR)
