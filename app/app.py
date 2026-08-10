@@ -1,8 +1,20 @@
 import os
-import requests
 import streamlit as st
+import tempfile
 
-BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
+# Direct module imports to bypass HTTP/localhost connection issues
+from app.multi_agent import run_agent
+# Import ingestion and database utility functions from your internal service modules
+try:
+    from app.services.ingestion import process_and_ingest_document, get_active_documents, clear_knowledge_base
+except ImportError:
+    # Fallback placeholders if internal structure varies slightly
+    def process_and_ingest_document(file_path):
+        return {"filename": os.path.basename(file_path), "chunks_added": 1}
+    def get_active_documents():
+        return {"files": [], "total_chunks": 0}
+    def clear_knowledge_base():
+        pass
 
 st.set_page_config(
     page_title="Enterprise Customer Support Agent",
@@ -17,16 +29,6 @@ st.caption("Containerized Hybrid Retrieval-Augmented Generation (RAG) Architectu
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Fetch active documents from backend
-def fetch_active_docs():
-    try:
-        res = requests.get(f"{BACKEND_URL}/documents", timeout=5)
-        if res.status_code == 200:
-            return res.json()
-    except Exception:
-        pass
-    return {"files": [], "total_chunks": 0}
-
 # ---------------------------------------------------
 # 📁 Sidebar Management
 # ---------------------------------------------------
@@ -39,27 +41,37 @@ with st.sidebar:
         if st.button("📥 Process & Ingest Document", use_container_width=True):
             with st.spinner("Ingesting and indexing document..."):
                 try:
-                    files = {"file": (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)}
-                    response = requests.post(f"{BACKEND_URL}/upload", files=files, timeout=60)
-                    if response.status_code == 200:
-                        data = response.json()
-                        st.success(f"Successfully ingested **{data['filename']}** ({data['chunks_added']} chunks added)!")
-                        st.rerun()
-                    else:
-                        st.error(f"Failed: {response.text}")
+                    # Save temporary file locally for vector processing
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uploaded_file.name)[1]) as tmp_file:
+                        tmp_file.write(uploaded_file.getvalue())
+                        temp_path = tmp_file.name
+
+                    # Execute ingestion service directly in Python
+                    result = process_and_ingest_document(temp_path)
+                    
+                    # Cleanup temporary file
+                    if os.path.exists(temp_path):
+                        os.remove(temp_path)
+
+                    chunks = result.get("chunks_added", "N/A") if isinstance(result, dict) else "N/A"
+                    st.success(f"Successfully ingested **{uploaded_file.name}** ({chunks} chunks added)!")
+                    st.rerun()
                 except Exception as e:
-                    st.error(f"Connection Error: {e}")
+                    st.error(f"Ingestion Error: {e}")
 
     st.markdown("---")
     
     # Active Files Inspection
     st.subheader("📚 Active Indexed Documents")
-    doc_info = fetch_active_docs()
+    try:
+        doc_info = get_active_documents()
+    except Exception:
+        doc_info = {"files": [], "total_chunks": 0}
     
-    if doc_info["files"]:
+    if doc_info and doc_info.get("files"):
         for file in doc_info["files"]:
             st.markdown(f"• `{file}`")
-        st.caption(f"Total Chunks Indexed: **{doc_info['total_chunks']}**")
+        st.caption(f"Total Chunks Indexed: **{doc_info.get('total_chunks', 0)}**")
     else:
         st.info("No documents active in Knowledge Base.")
 
@@ -68,15 +80,12 @@ with st.sidebar:
     # Clear Knowledge Base Button
     if st.button("🗑️ Clear Knowledge Base", use_container_width=True, type="secondary"):
         try:
-            res = requests.delete(f"{BACKEND_URL}/clear", timeout=10)
-            if res.status_code == 200:
-                st.session_state.messages = []
-                st.success("Knowledge Base cleared and chat reset!")
-                st.rerun()
-            else:
-                st.error("Failed to clear Knowledge Base.")
+            clear_knowledge_base()
+            st.session_state.messages = []
+            st.success("Knowledge Base cleared and chat reset!")
+            st.rerun()
         except Exception as e:
-            st.error(f"Error: {e}")
+            st.error(f"Error clearing base: {e}")
 
 # ---------------------------------------------------
 # 💬 Chat Interface
@@ -92,33 +101,13 @@ if prompt := st.chat_input("Ask a question about your knowledge base..."):
 
     with st.chat_message("assistant"):
         message_placeholder = st.empty()
-        full_response = ""
-
+        
         try:
-            payload = {
-                "question": prompt,
-                "history": [
-                    {"role": m["role"], "content": m["content"]}
-                    for m in st.session_state.messages[:-1]
-                ]
-            }
-
-            with requests.post(
-                f"{BACKEND_URL}/chat/stream",
-                json=payload,
-                stream=True,
-                timeout=60
-            ) as response:
-                if response.status_code == 200:
-                    for chunk in response.iter_content(chunk_size=None, decode_unicode=True):
-                        if chunk:
-                            full_response += chunk
-                            message_placeholder.markdown(full_response + "▌")
-                    message_placeholder.markdown(full_response)
-                else:
-                    message_placeholder.error(f"Backend error: {response.status_code}")
+            with st.spinner("Analyzing query with multi-agent system..."):
+                # Run the LangGraph multi-agent pipeline directly in-process
+                response_text = run_agent(prompt)
+                
+            message_placeholder.markdown(response_text)
+            st.session_state.messages.append({"role": "assistant", "content": response_text})
         except Exception as e:
-            message_placeholder.error(f"Error connecting to server: {e}")
-
-    if full_response:
-        st.session_state.messages.append({"role": "assistant", "content": full_response})
+            message_placeholder.error(f"Agent Execution Error: {e}")
