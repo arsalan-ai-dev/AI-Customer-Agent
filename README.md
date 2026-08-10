@@ -14,6 +14,13 @@ An enterprise-grade, asynchronous AI customer support platform leveraging **Dyna
 - 📚 **API Documentation:** https://ai-customer-agent-02vo.onrender.com/docs
 
 > Deployed on Render with a Streamlit interface and FastAPI REST API.
+## 📸 Screenshots
+
+### Customer Support Interface
+![Customer Support Agent](screenshots/customer-support.png)
+
+### RAG-Based Response
+![RAG Response](screenshots/rag-response.png)
 
 ---
 
